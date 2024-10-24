@@ -65,11 +65,9 @@ def get_difference_list(clean_image_list, watermark_image_list, num_images):
 def no_removal(image: np.ndarray, *args, **kwargs):
     return image
 
-def scale_removal(image: np.ndarray, watermark: np.ndarray, factor: int, watermark_bound: int, sign: bool, random_flip: bool = False, invert: bool = False):
+def scale_removal(image: np.ndarray, watermark: np.ndarray, factor: int, watermark_bound: int, sign: bool, random_flip: bool = False):
     image = copy.deepcopy(image)
     watermark = copy.deepcopy(watermark)
-    if invert:
-        watermark *= -1
     if sign:
         watermark = np.sign(watermark)
     if random_flip:
@@ -145,26 +143,10 @@ def parse_args() -> argparse.Namespace:
     
     return parser.parse_args()
 
-def setup_removal_methods(blackbox_watermarks: List, graybox_watermarks: List) -> List[RemovalMethod]:
+def setup_removal_methods(methods_config: List) -> List[RemovalMethod]:
     """Set up the removal methods with their parameters."""
-    methods_config = [
-        # Blackbox methods
-        ("None                    [Blackbox]", blackbox_watermarks, no_removal, {}),
-        ("StatWatermark           [Blackbox]", blackbox_watermarks, scale_removal, 
-         {'factor': 1, 'watermark_bound': None, 'sign': False}),
-        ("StatForge               [Blackbox]", blackbox_watermarks, scale_removal,
-         {'factor': 1, 'watermark_bound': None, 'sign': False, 'invert': True}),
-        
-        # Graybox methods
-        ("None                    [Graybox]", graybox_watermarks, no_removal, {}),
-        ("StatWatermark           [Graybox]", graybox_watermarks, scale_removal,
-         {'factor': 1, 'watermark_bound': None, 'sign': False}),
-        ("StatForge               [Graybox]", graybox_watermarks, scale_removal,
-         {'factor': 1, 'watermark_bound': None, 'sign': False, 'invert': True}),
-    ]
-    
-    return [RemovalMethod(desc, diff, func, kwargs) 
-            for desc, diff, func, kwargs in methods_config]
+
+    return [RemovalMethod(desc, diff, func, kwargs) for desc, diff, func, kwargs in methods_config]
 
 def main():
     args = parse_args()
@@ -196,16 +178,41 @@ def main():
         args.num_images
     )
     
-    graybox_watermarks = get_difference_list(
+    greybox_watermarks = get_difference_list(
         ind_clean_images,
         watermarked_images,
         args.num_images
     )
     
     # Setup removal methods
-    removal_methods = setup_removal_methods(blackbox_watermarks, graybox_watermarks)
+    removal_methods_config = [
+        # Blackbox methods
+        ("No_Operation_______[Blackbox]", blackbox_watermarks, no_removal, {}),
+        ("Subtract_Pattern___[Blackbox]", blackbox_watermarks, scale_removal, 
+         {'factor': 1, 'watermark_bound': None, 'sign': False}),
+        
+        # Greybox methods
+        ("No_Operation_______[Greybox]_", greybox_watermarks, no_removal, {}),
+        ("Subtract_Pattern___[Greybox]_", greybox_watermarks, scale_removal,
+         {'factor': 1, 'watermark_bound': None, 'sign': False}),
+    ]
+
+    forgery_methods_config = [
+        # Blackbox methods
+        ("No_Operation_______[Blackbox]", blackbox_watermarks, no_removal, {}),
+        ("Add_Pattern________[Blackbox]", blackbox_watermarks, scale_removal,
+         {'factor': -1, 'watermark_bound': None, 'sign': False}),
+        
+        # Greybox methods
+        ("No_Operation_______[Greybox]_", greybox_watermarks, no_removal, {}),
+        ("Add_Pattern________[Greybox]_", greybox_watermarks, scale_removal,
+         {'factor': -1, 'watermark_bound': None, 'sign': False}),
+    ]
+
+    removal_methods = setup_removal_methods(removal_methods_config, blackbox_watermarks, greybox_watermarks)
+    forgery_methods = setup_removal_methods(forgery_methods_config, blackbox_watermarks, greybox_watermarks)
     
-    # Evaluate watermark removal
+    # Evaluate watermark removal (on watermarked images)
     evaluate_watermark_removal(
         eval_images_dir=args.watermarked_path,
         num_eval_images=args.num_eval_images,
@@ -214,7 +221,19 @@ def main():
         removal_methods=removal_methods,
         num_images=args.num_images,
         image_size=image_size,
-        save_path=args.output_path
+        save_path=os.path.join(args.output_path, 'removal')
+    )
+
+    # Evaluate watermark forgery (on clean images)
+    evaluate_watermark_removal(
+        eval_images_dir=args.ind_clean_path,
+        num_eval_images=args.num_eval_images,
+        title='Watermark forgery',
+        watermark_method=args.watermark_method,
+        removal_methods=forgery_methods,
+        num_images=args.num_images,
+        image_size=image_size,
+        save_path=os.path.join(args.output_path, 'forgery')
     )
 
 if __name__ == "__main__":
